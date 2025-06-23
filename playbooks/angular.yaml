@@ -1,0 +1,201 @@
+---
+- hosts: angular-vm
+
+  vars:
+      frontendappdir: "{{ ansible_user_dir }}/frontend"
+      branch: "master"
+      site_location: /var/www/angular
+
+  pre_tasks:
+
+    - name: Find my public ip
+      uri:
+        url: http://ifconfig.me/ip
+        return_content: yes
+      register: ip_response
+
+    - name: See public ip
+      debug:
+        var: ip_response.content
+
+    - name: Install Nginx
+      package:
+        name: nginx
+        state: latest
+        update_cache: yes
+      become: yes
+
+    - name: Install nvm
+      shell: |
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+      args:
+        executable: /bin/bash
+        chdir: "$HOME"
+        creates: "$HOME/.nvm/nvm.sh"
+
+    - name: Setup .profile
+      ansible.builtin.lineinfile:
+        path: ~/.profile
+        line: source ~/.nvm/nvm.sh # This will make sure Node is on the user's PATH
+        create: yes
+
+    - name: "debug"
+      ansible.builtin.debug:
+        msg: "PATH : {{ ansible_env.PATH }}"
+      
+    - name: Install node
+      shell: |
+        source $HOME/.nvm/nvm.sh && nvm install 20.19.1
+      args:
+        executable: /bin/bash
+        chdir: "$HOME"
+        creates: "$HOME/.nvm/versions/node/v20.19.1"
+  
+    - name: Install Git
+      package:
+        name: git
+        state: latest
+      become: yes
+
+
+
+  tasks:
+    - name: "Clone the Angular repository"
+      git:
+          repo: "https://github.com/dim-sky/AngularApp.git"
+          dest: "{{ frontendappdir }}"
+          version: "{{ branch }}"
+          force: yes
+
+    # - name: copy env file
+    #   shell : "cp {{frontendappdir}}/.env.example {{frontendappdir}}/.env"
+
+    # - name: populate  ~/.env
+    #   lineinfile:
+    #     dest: "{{frontendappdir}}/.env"
+    #     state: present
+    #     regexp: "^{{item.key}}="
+    #     line: "{{item.key}}='{{item.value}}'"
+    #   with_items:
+    #     - "{{app | dict2items}}"
+
+
+    # - name: Use node version 19
+    #   shell: nvm use 20.19.1
+    #   async: 0
+    #   poll: 0
+
+    - name: Replace localhsot -> ip in proxy.conf.jason
+      replace:
+        path: "{{ frontendappdir }}/proxy.conf.json"
+        regexp: '^      "target": "http://localhost:8080",'
+        replace: '      "target": "http://192.168.56.30:8080",'
+    
+    - name: Replace localhsot -> ip in endpointsService.ts
+      replace:
+        path: "{{ frontendappdir }}/src/app/services/endpointsService.ts"
+        regexp: "^    private baseUrl = 'http://localhost:8080';"
+        replace: "    private baseUrl = 'http://192.168.56.30:8080';"
+
+    - name: Replace localhsot -> ip in MyHttpService.ts
+      replace:
+        path: "{{ frontendappdir }}/src/app/services/MyHttpService.ts"
+        regexp: "^  private apiUrl = 'http://localhost:8080/student';"
+        replace: "  private apiUrl = 'http://192.168.56.30:8080/student';"
+
+
+    - name: Install and build Angular app
+      shell: |
+        export NVM_DIR="$HOME/.nvm"
+        source "$NVM_DIR/nvm.sh"
+        nvm use 20.19.1
+        cd /home/vagrant/frontend
+        npm install
+        npm run build --prod
+      args:
+        executable: /bin/bash
+
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+      become: yes
+
+    - name: Fix permissions for nginx to access Angular files
+      file:
+        path: "{{ item }}"
+        mode: '0755'
+      become: yes
+      with_items:
+        - /home/vagrant
+        - /home/vagrant/frontend
+        - /home/vagrant/frontend/dist
+
+    - name: Fix ownership and permissions of dist directory
+      file:
+        path: /home/vagrant/frontend/dist
+        owner: vagrant
+        group: www-data
+        mode: '0755'
+        recurse: yes
+      become: yes
+
+    - name: Make sure all files in dist are readable
+      shell: find /home/vagrant/frontend/dist/ -type f -exec chmod 644 {} \;
+      become: yes
+
+    - name: Restart nginx after permission fix
+      systemd:
+        name: nginx
+        state: restarted
+      become: yes
+  
+    - name: Create nginx config for Angular
+      template:
+        src: ../files/nginx.http.j2
+        dest: /etc/nginx/sites-available/angular
+        owner: root
+        group: root
+        mode: '0644'
+      become: yes
+      notify: restart nginx
+
+    - name: Enable Angular site
+      file:
+        src: /etc/nginx/sites-available/angular
+        dest: /etc/nginx/sites-enabled/angular
+        state: link
+      become: yes
+      notify: restart nginx
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      become: yes
+      notify: restart nginx
+
+    - name: Test nginx configuration
+      command: nginx -t
+      become: yes
+      register: nginx_test
+      ignore_errors: yes
+
+    - name: Debug nginx test result
+      debug:
+        msg: "{{ nginx_test.stdout_lines + nginx_test.stderr_lines }}"
+
+    - name: Start and enable nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+      become: yes
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+      become: yes

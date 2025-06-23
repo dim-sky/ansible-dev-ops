@@ -1,0 +1,17 @@
+server {
+    listen 80;
+    server_name _;
+    
+    root /home/vagrant/frontend/dist/test_app/browser;
+    index index.csr.html index.html;  # Look for CSR file first
+
+    # Handle Angular routing
+    location / {
+        try_files $uri $uri/ /index.csr.html;
+    }
+
+    # Cache static files
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+    }
+}

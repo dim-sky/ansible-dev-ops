@@ -1,0 +1,24 @@
+---
+control:
+  hosts:
+    local-control:
+      ansible_connection: local
+    # control-vm:
+    #   ansible_host: control
+
+appservers:
+    hosts:
+      spring-vm:
+        ansible_host: spring-vm
+      angular-vm:
+        ansible_host: angular-vm
+      # gcloud-app-server:
+      #   ansible_host: devops-gcloud
+      # azure-db-server:
+      #     ansible_host: devops-azure
+      
+
+dbservers:
+    hosts:
+      postgres-vm:
+          ansible_host: postgres-vm
