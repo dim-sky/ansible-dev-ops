@@ -1,25 +1,46 @@
 ---
-  - name: Deploy app with docker compose
-    hosts: all
+- hosts: all
+  tasks:
 
-    tasks:
-      - name: Create app directory
-        file:
-          path: "{{ ansible_env.HOME }}/app"
-          state: directory
-          owner: "{{ ansible_user_id }}"
-          mode: '0755'
-        
+    - name: Check if Docker is installed
+      shell: docker --version && docker compose version
+      register: docker_version_result
+      ignore_errors: true
 
-      - name: Copy docker compose file
-        copy:
-          src: docker_compose.yaml
-          dest: "{{ ansible_env.HOME }}/app/docker-compose.yaml"
-          owner: "{{ ansible_user_id }}"
-          mode: '0644'
+    - name: Set Docker installed fact
+      set_fact:
+        docker_installed: "{{ docker_version_result.rc == 0 }}"
 
-      - name: Deploy with docker compose
-        shell: sudo docker compose up 
-        args: 
-          chdir: "{{ ansible_env.HOME }}/app"
-        
+    - name: Include install_docker playbook if Docker is not installed
+      include_tasks: docker_installation.yaml
+      when: not docker_installed
+
+    - name: "Clone the Spring repository"
+      git:
+        repo: "https://github.com/dim-sky/dist_Systems_Backend.git"
+        dest: "{{ appdir }}"
+        version: "{{ branch }}"
+        force: yes
+
+    - name: Tear down existing services
+      community.docker.docker_compose_v2:
+        project_src: "{{ appdir }}"
+        state: absent
+      
+
+    - name: Create and start services
+      community.docker.docker_compose_v2:
+        project_src: "{{ appdir }}"
+        build: always
+        state: present
+      register: output
+      notify: Restart Docker Compose
+
+    - debug:
+        var: output
+
+  handlers:
+  - name: Restart Docker Compose
+    community.docker.docker_compose_v2:
+      project_src: "{{ appdir }}"
+      state: restarted
