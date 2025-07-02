@@ -11,7 +11,7 @@
 
 dbservers:
   hosts:
-    postgres:
+    postgres-vm:
       ansible_host: postgres-vm
 
 appservers:
