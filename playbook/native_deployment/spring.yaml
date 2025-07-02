@@ -1,0 +1,161 @@
+---
+  - name: install spring boot application
+    hosts: appservers
+
+    pre_tasks:
+
+    ################################### installing java
+      - name: "install java"
+        apt:
+          name: openjdk-21-jdk
+          state: present
+          update_cache: yes
+        tags:
+          - install
+        become: yes
+        become_user: root
+
+    tasks:
+    ################################### debug module to check if path is correct
+      - name: "show app_dir value"
+        debug:
+          msg: "appdir is {{ ansible_user_dir }}"
+
+    ################################### cloning git repo locally to vm home directory
+      - name: "clone git repo"
+        git:
+          repo: 'https://github.com/dim-sky/dist_Systems_Backend.git'
+          dest: "{{ appdir }}"
+          version: "{{ branch }}"
+          force: yes
+    
+    ################################## making mvnw executable
+      - name: "Change permissions to mvnw"
+        command: "sudo chmod 766 mvnw"
+        args: 
+          chdir: "{{ appdir }}"
+    
+    ################################## editing pom.xml so that we can create jar files instead of war with maven
+      - name: "Change war to jar"
+        lineinfile:
+          path: "{{ appdir }}/pom.xml"
+          state: absent
+          regexp: '^\s*<packaging>war</packaging>$'
+          
+
+    ################################## renew db connections parameters
+      - name: "Populate application.properties"
+        lineinfile:
+          dest: "{{ appdir }}/src/main/resources/application.properties"
+          state: present
+          regexp: "^{{ item.key }}="
+          line: "{{ item.key }}={{ item.value }}"
+        with_items:
+          - "{{ app.env | dict2items }}"
+    
+    #################################### build application with maven jar
+      - name: "Built spring project"
+        block:
+
+          - name: "Build the spring application"
+            command: "./mvnw package -Dmaven.test.skip "
+            args: 
+              chdir: "{{ appdir }}"
+            become: yes
+
+        ################################ fix for maven if application build fails 
+        #rescue: 
+#
+        #  - name: Fetch the SHA-512 checksum for Maven 3.9.9
+        #    get_url:
+        #      url: https://downloads.apache.org/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip.sha512
+        #      dest: /tmp/maven_sha512.txt
+        #      validate_certs: yes
+        #      force: yes
+#
+        #  - name: Read the SHA-512 checksum from the file
+        #    command: cat /tmp/maven_sha512.txt
+        #    register: sha512_checksum
+#
+        #  - name: Replace the distributionSha512Sum line in maven-wrapper.properties
+        #    replace:
+        #      path: "{{ appdir }}/.mvn/wrapper/maven-wrapper.properties"
+        #      regexp: '^distributionSha'
+        #      replace: "distributionSha512Sum={{ sha512_checksum.stdout }}"
+        #
+        #  - name: Clean up the temporary file
+        #    file:
+        #      path: /tmp/maven_sha512.txt
+        #      state: absent
+        #    when: sha512_checksum is defined
+        #
+        ################################ try rebuilding the application with the fix embedded
+        #always:
+        #  - name: "Build the Spring application"
+        #    command: "./mvnw package -Dmaven.test.skip "
+        #    args:
+        #        chdir: "{{ appdir }}"
+
+      - name: copy spring service file
+        template:
+          src: ../../files/spring.service.j2
+          dest: /etc/systemd/system/spring.service
+        become: yes
+        become_user: root
+        notify: 
+          - restart spring
+
+      - name: reload spring service
+        service:
+          name: spring
+          state: restarted
+        become: yes
+      
+      - name: ensure spring service started
+        service:
+          name: spring
+          state: started
+          enabled: yes
+        become: yes
+
+      - name: install nginx web server
+        apt:
+          name: nginx
+          update_cache: yes
+        become: yes
+        become_user: root   
+      
+      - name: copy nginx conf file
+        template:
+          src: ../../files/nginx.http.j2
+          dest: "/etc/nginx/sites-available/spring"
+        become: yes
+
+      - name: enable spring site in nginx
+        file:
+          src: "/etc/nginx/sites-available/spring"
+          dest: "/etc/nginx/sites-enabled/spring"
+          state: link
+        become: yes
+        notify: restart nginx
+
+      - name: de-activate default nginx site
+        file:
+          path: /etc/nginx/sites-enabled/default
+          state: absent
+        become: yes
+        notify: restart nginx
+
+
+    handlers:
+      - name: restart spring
+        service:
+          name: spring
+          state: restarted
+        become: yes
+      
+      - name: restart nginx
+        service:
+          name: nginx
+          state: restarted
+        become: yes

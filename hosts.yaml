@@ -1,0 +1,28 @@
+---
+#azure-hosts:
+#  hosts:
+#    devops-vm-1:
+#      ansible_host: az-devops
+
+#local-vms:
+#  hosts:
+#    local-vm-1:
+#      ansible_host: default
+
+dbservers:
+  hosts:
+    postgres:
+      ansible_host: postgres-vm
+
+appservers:
+  hosts:
+    spring-vm:
+      ansible_host: spring-vm
+    angular-vm:
+      ansible_host: angular-vm
+    docker-vm:
+      ansible_host: az-devops
+    
+    
+
+

@@ -1,0 +1,25 @@
+---
+  - name: Deploy app with docker compose
+    hosts: all
+
+    tasks:
+      - name: Create app directory
+        file:
+          path: "{{ ansible_env.HOME }}/app"
+          state: directory
+          owner: "{{ ansible_user_id }}"
+          mode: '0755'
+        
+
+      - name: Copy docker compose file
+        copy:
+          src: docker_compose.yaml
+          dest: "{{ ansible_env.HOME }}/app/docker-compose.yaml"
+          owner: "{{ ansible_user_id }}"
+          mode: '0644'
+
+      - name: Deploy with docker compose
+        shell: sudo docker compose up 
+        args: 
+          chdir: "{{ ansible_env.HOME }}/app"
+        

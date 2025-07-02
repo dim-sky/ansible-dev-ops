@@ -1,0 +1,124 @@
+---
+  - name: install prostgres
+    hosts: dbservers
+    become: yes
+    become_user: root
+
+    tasks:
+      ################################## installing neccessary packages
+      - name: install postgres package
+        apt:
+          name: postgresql
+          state: present
+          update_cache: yes
+      
+      - name: install pip package
+        apt:
+          name: python3-pip
+          state: present
+          update_cache: yes
+       ################################### installing python pg module for user/db creation
+      - name: install Python pg module
+        command: pip3 install psycopg2-binary 
+
+      ################################### editing configuration files in prostgres package for postgres1 16
+      - block:
+
+        - name: edit postgres.conf
+          lineinfile: 
+            path: /etc/postgresql/16/main/postgresql.conf
+            regexp: '^listen_addresses ='
+            line: "listen_addresses='*'"
+          notify: 
+            - restart postgres
+          tags:
+            - edit
+        - name: edit pg_hba.conf
+          lineinfile: 
+            path: /etc/postgresql/16/main/pg_hba.conf
+            line: "host all all 0.0.0.0/0 md5"
+            create: yes
+          notify: 
+            - restart postgres
+          tags:
+            - edit
+        
+        when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '24.04'
+
+      ################################### editing configuration files in prostgres package for postgres 14
+      - block:
+
+        - name: edit postgres.conf
+          lineinfile: 
+            path: /etc/postgresql/14/main/postgresql.conf
+            regexp: '^#listen_addresses ='
+            line: "listen_addresses='*'"
+          notify: 
+            - restart postgres
+          tags:
+            - edit
+        - name: edit pg_hba.conf
+          lineinfile: 
+            path: /etc/postgresql/14/main/pg_hba.conf
+            line: "host all all 0.0.0.0/0 md5"
+            create: yes
+          notify: 
+            - restart postgres
+          tags:
+            - edit
+        
+        when: ansible_distribution == 'Ubuntu' and ansible_distribution_version == '22.04'
+
+
+      #################################### creating user and db
+      - block: 
+
+        - name: create postgres user
+          postgresql_user:
+            user: "{{ db.user}}"
+            password: '{{ db.password }}'
+          become: yes
+          become_user: postgres
+
+        - name: create postgres db
+          postgresql_db:
+            name: "{{ db.name}}"
+            owner: "{{ db.user}}"
+          become: yes
+          become_user: postgres
+        
+        rescue: 
+          #- name: install Python pg module
+          #  command: pip3 install psycopg2-binary --break-system-packages
+          #  tags: 
+          #    - install
+
+          - name: apt install psycopg2-binary
+            apt:
+              name: python3-psycopg2
+              state: present
+              tags: 
+                - install
+        
+        always: 
+          - name: create postgres user
+            postgresql_user:
+              user: "{{ db.user}}"
+              password: '{{ db.password }}'
+            become: yes
+            become_user: postgres
+
+          - name: create postgres db
+            postgresql_db:
+              name: "{{ db.name }}"
+              owner: "{{ db.user }}"
+            become: yes
+            become_user: postgres
+
+
+    ##################################### restarting postgresql service when changing config files
+    handlers:
+      - name: restart postgres 
+        service: 
+          name: postgresql
+          state: restarted
